@@ -1,0 +1,72 @@
+---
+- name: Install Apache Cassandra OSS from tarball
+  hosts: all
+  become: yes
+  vars:
+    cassandra_version: "4.0.10"
+    cassandra_user: cassandra
+    cassandra_group: cassandra
+    cassandra_install_dir: /opt/cassandra
+    cassandra_data_dir: /var/lib/cassandra
+    cassandra_log_dir: /var/log/cassandra
+    cassandra_tarball_url: "https://archive.apache.org/dist/cassandra/{{ cassandra_version }}/apache-cassandra-{{ cassandra_version }}-bin.tar.gz"
+    cassandra_tarball_dest: "/tmp/apache-cassandra-{{ cassandra_version }}.tar.gz"
+
+  tasks:
+    - name: Install required packages
+      apt:
+        name:
+          - openjdk-11-jdk
+          - sysstat
+          - dstat
+          - tar
+          - curl
+        state: present
+        update_cache: yes
+
+    - name: Create cassandra user and group
+      ansible.builtin.user:
+        name: "{{ cassandra_user }}"
+        group: "{{ cassandra_group }}"
+        system: yes
+        shell: /usr/sbin/nologin
+      ignore_errors: true
+
+    - name: Create installation, data, and log directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ cassandra_user }}"
+        group: "{{ cassandra_group }}"
+        mode: '0755'
+      loop:
+        - "{{ cassandra_install_dir }}"
+        - "{{ cassandra_data_dir }}"
+        - "{{ cassandra_log_dir }}"
+
+    - name: Download Apache Cassandra tarball
+      get_url:
+        url: "{{ cassandra_tarball_url }}"
+        dest: "{{ cassandra_tarball_dest }}"
+        mode: '0644'
+
+    - name: Extract Apache Cassandra tarball
+      unarchive:
+        src: "{{ cassandra_tarball_dest }}"
+        dest: "{{ cassandra_install_dir }}"
+        remote_src: yes
+        creates: "{{ cassandra_install_dir }}/apache-cassandra-{{ cassandra_version }}"
+
+    - name: Set ownership for installation directory
+      file:
+        path: "{{ cassandra_install_dir }}"
+        owner: "{{ cassandra_user }}"
+        group: "{{ cassandra_group }}"
+        recurse: yes
+
+    - name: Enable Cassandra systemd service manually (optional)
+      debug:
+        msg: |
+          Cassandra tarball install complete.
+          You must create a systemd service unit or run Cassandra manually:
+          {{ cassandra_install_dir }}/apache-cassandra-{{ cassandra_version }}/bin/cassandra -R
