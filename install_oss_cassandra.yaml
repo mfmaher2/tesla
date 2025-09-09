@@ -77,6 +77,23 @@
         regexp: '\${cassandra\.logdir}'
         replace: "{{ cassandra_log_dir }}"
 
+    - name: Create Python 3.10 venv for cqlsh
+      become_user: "{{ cassandra_user }}"
+      shell: |
+        python3.10 -m venv {{ cassandra_venv }}
+        source {{ cassandra_venv }}/bin/activate && pip install --upgrade pip && pip install six cassandra-driver
+      args:
+        executable: /bin/bash
+        creates: "{{ cassandra_venv }}/bin/activate"
+
+    - name: Patch cqlsh.py to use venv Python
+      lineinfile:
+        path: "{{ cassandra_install_dir }}/bin/cqlsh.py"
+        regexp: '^#!.*python'
+        line: "#!{{ cassandra_venv }}/bin/python"
+        state: present
+      become_user: "{{ cassandra_user }}"
+
 - name: Start up Cassandra process on the VMs
   hosts: all
   serial: 1
