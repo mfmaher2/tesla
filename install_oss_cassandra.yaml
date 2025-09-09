@@ -3,14 +3,14 @@
   hosts: all
   become: yes
   vars:
-    cassandra_version: "4.0.10"
+    cassandra_version: "4.1.10"
+    oss_tarball: "./apache-cassandra-4.1.10-bin.tar.gz"  # Replace with your actual tarball path
     cassandra_user: cassandra
     cassandra_group: cassandra
     cassandra_install_dir: /opt/cassandra
     cassandra_data_dir: /var/lib/cassandra
     cassandra_log_dir: /var/log/cassandra
-    cassandra_tarball_url: "https://archive.apache.org/dist/cassandra/{{ cassandra_version }}/apache-cassandra-{{ cassandra_version }}-bin.tar.gz"
-    cassandra_tarball_dest: "/tmp/apache-cassandra-{{ cassandra_version }}.tar.gz"
+    logback_xml: "{{ cassandra_install_dir }}/conf/logback.xml"
 
   tasks:
     - name: Install required packages
@@ -38,24 +38,24 @@
         state: directory
         owner: "{{ cassandra_user }}"
         group: "{{ cassandra_group }}"
-        mode: '0755'
+        mode: '0777'
       loop:
         - "{{ cassandra_install_dir }}"
         - "{{ cassandra_data_dir }}"
         - "{{ cassandra_log_dir }}"
 
-    - name: Download Apache Cassandra tarball
-      get_url:
-        url: "{{ cassandra_tarball_url }}"
-        dest: "{{ cassandra_tarball_dest }}"
+    - name: Copy OSS tarball to remote host
+      copy:
+        src: "{{ oss_tarball }}"
+        dest: /tmp/oss.tar.gz
         mode: '0644'
 
-    - name: Extract Apache Cassandra tarball
+    - name: Extract OSS tarball 
       unarchive:
-        src: "{{ cassandra_tarball_dest }}"
+        src: /tmp/oss.tar.gz
         dest: "{{ cassandra_install_dir }}"
         remote_src: yes
-        creates: "{{ cassandra_install_dir }}/apache-cassandra-{{ cassandra_version }}"
+        extra_opts: [--strip-components=1]
 
     - name: Set ownership for installation directory
       file:
@@ -64,9 +64,34 @@
         group: "{{ cassandra_group }}"
         recurse: yes
 
-    - name: Enable Cassandra systemd service manually (optional)
-      debug:
-        msg: |
-          Cassandra tarball install complete.
-          You must create a systemd service unit or run Cassandra manually:
-          {{ cassandra_install_dir }}/apache-cassandra-{{ cassandra_version }}/bin/cassandra -R
+    - name: Set ownership for installation directory
+      file:
+        path: "{{ cassandra_install_dir }}"
+        owner: "{{ cassandra_user }}"
+        group: "{{ cassandra_group }}"
+        recurse: yes
+
+    - name: Set logging locations in logback.xml
+      replace:
+        path: "{{ logback_xml }}"
+        regexp: '\${cassandra\.logdir}'
+        replace: "{{ cassandra_log_dir }}"
+
+- name: Start up Cassandra process on the VMs
+  hosts: all
+  serial: 1
+  vars:
+    cassandra_install_dir: /opt/cassandra
+    ansible_remote_tmp: /tmp/.ansible/tmp
+    ansible_become_flags: "-n"
+  tasks:
+    - name: Stop existing Cassandra process (if running)
+      become: yes
+      become_user: cassandra
+      shell: "pkill -u cassandra -f CassandraDaemon || true"
+      ignore_errors: yes
+
+    - name: Start Cassandra using su as cassandra user
+      become: yes
+      shell: "su -s /bin/bash -c '{{ cassandra_install_dir }}/bin/cassandra -R' cassandra"
+
